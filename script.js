@@ -1,34 +1,209 @@
+// Initialize Supabase
+const SUPABASE_URL = 'https://pbdblhxxqnfuwyrqrest.supabase.co';
+const SUPABASE_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InBiZGJsaHh4cW5mdXd5cnFyZXN0Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NDIwNTA1MTEsImV4cCI6MjA1NzYyNjUxMX0.c4HnVEnECphLS9aH2QKqT_o4Dqr9HGc-WK7pDKI2Dww';
+const supabase = createClient(SUPABASE_URL, SUPABASE_KEY);
+
 document.addEventListener('DOMContentLoaded', () => {
-    initializeStorage();
     setupEventListeners();
     loadCategories();
     openTab('categories');
 });
-
-function initializeStorage() {
-    if (!localStorage.getItem('categories')) {
-        localStorage.setItem('categories', JSON.stringify([]));
-    }
-    if (!localStorage.getItem('products')) {
-        localStorage.setItem('products', JSON.stringify([]));
-    }
-}
 
 function setupEventListeners() {
     // Tab navigation
     document.getElementById('categoriesTab').addEventListener('click', () => openTab('categories'));
     document.getElementById('productsTab').addEventListener('click', () => openTab('products'));
 
-    // Category form
+    // Forms
     document.getElementById('categoryForm').addEventListener('submit', handleCategorySubmit);
-
-    // Product form
     document.getElementById('productForm').addEventListener('submit', handleProductSubmit);
-
-    // Clear all data button
-    document.getElementById('clearAllData').addEventListener('click', clearAllData);
 }
 
+// Category Functions
+async function handleCategorySubmit(e) {
+    e.preventDefault();
+    const categoryId = document.getElementById('categoryId').value;
+    const categoryName = document.getElementById('categoryName').value.trim();
+
+    if (!categoryName) return;
+
+    try {
+        if (categoryId) {
+            // Update existing category
+            const { error } = await supabase
+                .from('categories')
+                .update({ name: categoryName })
+                .eq('id', categoryId);
+        } else {
+            // Add new category
+            const { error } = await supabase
+                .from('categories')
+                .insert([{ name: categoryName }]);
+        }
+        
+        loadCategories();
+        e.target.reset();
+    } catch (error) {
+        console.error('Error saving category:', error);
+    }
+}
+
+async function loadCategories() {
+    try {
+        const { data, error } = await supabase
+            .from('categories')
+            .select('*')
+            .order('created_at', { ascending: false });
+
+        const categoriesList = document.getElementById('categoriesList');
+        categoriesList.innerHTML = `
+            <table>
+                <thead><tr><th>Name</th><th>Actions</th></tr></thead>
+                <tbody>
+                    ${data.map(category => `
+                        <tr>
+                            <td>${category.name}</td>
+                            <td class="actions">
+                                <button onclick="editCategory('${category.id}')">Edit</button>
+                                <button class="delete" onclick="deleteCategory('${category.id}')">Delete</button>
+                            </td>
+                        </tr>
+                    `).join('')}
+                </tbody>
+            </table>
+        `;
+    } catch (error) {
+        console.error('Error loading categories:', error);
+    }
+}
+
+async function deleteCategory(id) {
+    if (!confirm('Delete this category?')) return;
+    
+    try {
+        const { error } = await supabase
+            .from('categories')
+            .delete()
+            .eq('id', id);
+        
+        loadCategories();
+    } catch (error) {
+        console.error('Error deleting category:', error);
+    }
+}
+
+// Product Functions
+async function handleProductSubmit(e) {
+    e.preventDefault();
+    const productId = document.getElementById('productId').value;
+    const imageFile = document.getElementById('productImage').files[0];
+
+    try {
+        let imageUrl = document.getElementById('productImage').dataset.currentImage || '';
+        
+        // Upload new image if selected
+        if (imageFile) {
+            const { data, error } = await supabase.storage
+                .from('product-images')
+                .upload(`products/${Date.now()}-${imageFile.name}`, imageFile);
+            
+            if (data) {
+                imageUrl = `${SUPABASE_URL}/storage/v1/object/public/product-images/${data.path}`;
+            }
+        }
+
+        const productData = {
+            name: document.getElementById('productName').value.trim(),
+            category_id: document.getElementById('productCategory').value,
+            wholesale_rate: parseFloat(document.getElementById('wholesaleRate').value),
+            doorknock_rate: parseFloat(document.getElementById('doorknockRate').value),
+            mrp: parseFloat(document.getElementById('mrp').value),
+            image_url: imageUrl
+        };
+
+        if (productId) {
+            // Update existing product
+            const { error } = await supabase
+                .from('products')
+                .update(productData)
+                .eq('id', productId);
+        } else {
+            // Add new product
+            const { error } = await supabase
+                .from('products')
+                .insert([productData]);
+        }
+
+        loadProducts();
+        e.target.reset();
+    } catch (error) {
+        console.error('Error saving product:', error);
+    }
+}
+
+async function loadProducts() {
+    try {
+        const { data, error } = await supabase
+            .from('products')
+            .select(`
+                *,
+                categories (name)
+            `)
+            .order('created_at', { ascending: false });
+
+        const productsList = document.getElementById('productsList');
+        productsList.innerHTML = `
+            <table>
+                <thead>
+                    <tr>
+                        <th>Image</th>
+                        <th>Name</th>
+                        <th>Category</th>
+                        <th>Wholesale</th>
+                        <th>Doorknock</th>
+                        <th>MRP</th>
+                        <th>Actions</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    ${data.map(product => `
+                        <tr>
+                            <td><img src="${product.image_url}" class="product-image" alt="${product.name}"></td>
+                            <td>${product.name}</td>
+                            <td>${product.categories?.name || 'N/A'}</td>
+                            <td>₹${product.wholesale_rate?.toFixed(2) || '0.00'}</td>
+                            <td>₹${product.doorknock_rate?.toFixed(2) || '0.00'}</td>
+                            <td>₹${product.mrp?.toFixed(2) || '0.00'}</td>
+                            <td class="actions">
+                                <button onclick="editProduct('${product.id}')">Edit</button>
+                                <button class="delete" onclick="deleteProduct('${product.id}')">Delete</button>
+                            </td>
+                        </tr>
+                    `).join('')}
+                </tbody>
+            </table>
+        `;
+    } catch (error) {
+        console.error('Error loading products:', error);
+    }
+}
+
+async function deleteProduct(id) {
+    if (!confirm('Delete this product?')) return;
+    
+    try {
+        const { error } = await supabase
+            .from('products')
+            .delete()
+            .eq('id', id);
+        
+        loadProducts();
+    } catch (error) {
+        console.error('Error deleting product:', error);
+    }
+}
+
+// Helper Functions
 function openTab(tabName) {
     document.querySelectorAll('.tab').forEach(tab => tab.classList.remove('active'));
     document.querySelectorAll('.section').forEach(section => section.classList.remove('active'));
@@ -45,156 +220,28 @@ function openTab(tabName) {
     }
 }
 
-// Category Functions
-function handleCategorySubmit(e) {
-    e.preventDefault();
-    const categories = JSON.parse(localStorage.getItem('categories'));
-    const categoryId = document.getElementById('categoryId').value;
-    const categoryName = document.getElementById('categoryName').value.trim();
+async function populateCategoryDropdown() {
+    try {
+        const { data, error } = await supabase
+            .from('categories')
+            .select('id, name')
+            .order('name', { ascending: true });
 
-    if (!categoryName) return;
-
-    if (categoryId) {
-        const index = categories.findIndex(c => c.id === categoryId);
-        categories[index].name = categoryName;
-    } else {
-        categories.push({
-            id: Date.now().toString(),
-            name: categoryName
-        });
+        const dropdown = document.getElementById('productCategory');
+        dropdown.innerHTML = data.map(c => 
+            `<option value="${c.id}">${c.name}</option>`
+        ).join('');
+    } catch (error) {
+        console.error('Error loading categories:', error);
     }
-
-    localStorage.setItem('categories', JSON.stringify(categories));
-    e.target.reset();
-    loadCategories();
 }
 
-function loadCategories() {
-    const categories = JSON.parse(localStorage.getItem('categories'));
-    const categoriesList = document.getElementById('categoriesList');
-    
-    const html = `
-        <table>
-            <thead>
-                <tr><th>Name</th><th>Actions</th></tr>
-            </thead>
-            <tbody>
-                ${categories.map(category => `
-                    <tr>
-                        <td>${category.name}</td>
-                        <td class="actions">
-                            <button onclick="editCategory('${category.id}')">Edit</button>
-                            <button class="delete" onclick="deleteCategory('${category.id}')">Delete</button>
-                        </td>
-                    </tr>
-                `).join('')}
-            </tbody>
-        </table>
-    `;
-    
-    categoriesList.innerHTML = html || '<p>No categories found</p>';
-}
-
+// Edit Functions
 function editCategory(id) {
     const categories = JSON.parse(localStorage.getItem('categories'));
     const category = categories.find(c => c.id === id);
     document.getElementById('categoryId').value = category.id;
     document.getElementById('categoryName').value = category.name;
-}
-
-function deleteCategory(id) {
-    const categories = JSON.parse(localStorage.getItem('categories'))
-                      .filter(c => c.id !== id);
-    localStorage.setItem('categories', JSON.stringify(categories));
-    loadCategories();
-}
-
-// Product Functions
-async function handleProductSubmit(e) {
-    e.preventDefault();
-    const products = JSON.parse(localStorage.getItem('products'));
-    const productId = document.getElementById('productId').value;
-
-    // Handle image upload
-    let imageBase64 = '';
-    const imageFile = document.getElementById('productImage').files[0];
-    if (imageFile) {
-        imageBase64 = await convertToBase64(imageFile);
-    }
-
-    const productData = {
-        id: productId || Date.now().toString(),
-        categoryId: document.getElementById('productCategory').value,
-        name: document.getElementById('productName').value.trim(),
-        wholesaleRate: parseFloat(document.getElementById('wholesaleRate').value),
-        doorknockRate: parseFloat(document.getElementById('doorknockRate').value),
-        mrp: parseFloat(document.getElementById('mrp').value),
-        image: imageBase64 || document.getElementById('productImage').dataset.currentImage || ''
-    };
-
-    if (!productData.name || !productData.categoryId) return;
-
-    if (productId) {
-        const index = products.findIndex(p => p.id === productId);
-        products[index] = { ...products[index], ...productData };
-    } else {
-        products.push(productData);
-    }
-
-    localStorage.setItem('products', JSON.stringify(products));
-    e.target.reset();
-    loadProducts();
-}
-
-function convertToBase64(file) {
-    return new Promise((resolve) => {
-        const reader = new FileReader();
-        reader.onload = () => resolve(reader.result);
-        reader.readAsDataURL(file);
-    });
-}
-
-function loadProducts() {
-    const products = JSON.parse(localStorage.getItem('products'));
-    const categories = JSON.parse(localStorage.getItem('categories'));
-    const productsList = document.getElementById('productsList');
-
-    const html = `
-        <table>
-            <thead>
-                <tr>
-                    <th>Image</th>
-                    <th>Name</th>
-                    <th>Category</th>
-                    <th>Wholesale</th>
-                    <th>Doorknock</th>
-                    <th>MRP</th>
-                    <th>Actions</th>
-                </tr>
-            </thead>
-            <tbody>
-                ${products.map(product => {
-                    const category = categories.find(c => c.id === product.categoryId);
-                    return `
-                        <tr>
-                            <td><img src="${product.image}" class="product-image" alt="${product.name}"></td>
-                            <td>${product.name}</td>
-                            <td>${category?.name || 'N/A'}</td>
-                            <td>₹${product.wholesaleRate.toFixed(2)}</td>
-                            <td>₹${product.doorknockRate.toFixed(2)}</td>
-                            <td>₹${product.mrp.toFixed(2)}</td>
-                            <td class="actions">
-                                <button onclick="editProduct('${product.id}')">Edit</button>
-                                <button class="delete" onclick="deleteProduct('${product.id}')">Delete</button>
-                            </td>
-                        </tr>
-                    `;
-                }).join('')}
-            </tbody>
-        </table>
-    `;
-
-    productsList.innerHTML = html || '<p>No products found</p>';
 }
 
 function editProduct(id) {
@@ -204,44 +251,8 @@ function editProduct(id) {
     document.getElementById('productId').value = product.id;
     document.getElementById('productCategory').value = product.categoryId;
     document.getElementById('productName').value = product.name;
-    document.getElementById('wholesaleRate').value = product.wholesaleRate;
-    document.getElementById('doorknockRate').value = product.doorknockRate;
+    document.getElementById('wholesaleRate').value = product.wholesale_rate;
+    document.getElementById('doorknockRate').value = product.doorknock_rate;
     document.getElementById('mrp').value = product.mrp;
-    
-    // Store current image for reference
-    document.getElementById('productImage').dataset.currentImage = product.image;
-}
-
-function deleteProduct(id) {
-    const products = JSON.parse(localStorage.getItem('products'))
-                    .filter(p => p.id !== id);
-    localStorage.setItem('products', JSON.stringify(products));
-    loadProducts();
-}
-
-function populateCategoryDropdown() {
-    const categories = JSON.parse(localStorage.getItem('categories'));
-    const dropdown = document.getElementById('productCategory');
-    
-    dropdown.innerHTML = categories.map(c => 
-        `<option value="${c.id}">${c.name}</option>`
-    ).join('');
-    
-    if (!categories.length) {
-        dropdown.innerHTML = '<option value="">No categories available</option>';
-    }
-}
-
-// NEW CLEAR ALL DATA FUNCTIONALITY
-function clearAllData() {
-    if (confirm('Are you sure you want to delete ALL data? This action cannot be undone!')) {
-        localStorage.removeItem('categories');
-        localStorage.removeItem('products');
-        initializeStorage();
-        loadCategories();
-        loadProducts();
-        document.getElementById('categoryForm').reset();
-        document.getElementById('productForm').reset();
-        alert('All data has been cleared successfully!');
-    }
+    document.getElementById('productImage').dataset.currentImage = product.image_url;
 }
